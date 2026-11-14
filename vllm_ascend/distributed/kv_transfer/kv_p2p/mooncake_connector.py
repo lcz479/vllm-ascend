@@ -238,6 +238,18 @@ class KVCacheTaskTracker:
         with self.done_task_lock:
             if request_id in self.reqs_to_process:
                 self.delayed_free_requests[request_id] = delay_start_time
+            else:
+                logger.warning(
+                    "MooncakeConnector add_delayed_request: request_id=%s is not "
+                    "tracked in reqs_to_process. Dropping the entry: recording it "
+                    "could republish finished_sending for a request whose blocks "
+                    "are already released or that is unknown to the scheduler "
+                    "(e.g. aborted between the KV push and the metadata "
+                    "handling). If this warning shows up for aborted requests, "
+                    "their KV blocks may leak until process restart; investigate "
+                    "the abort bookkeeping path.",
+                    request_id,
+                )
 
     def _retrieve_expired_requests(self):
         """Retrieve all expired delayed requests."""

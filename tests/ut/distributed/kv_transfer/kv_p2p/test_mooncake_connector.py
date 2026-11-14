@@ -2318,6 +2318,47 @@ def test_invalid_wire_metadata_never_submits_a_transfer(wire_transfer_contract, 
     ]
 
 
+def test_add_delayed_request_untracked_entry_is_dropped_with_warning(monkeypatch):
+    """A late/untracked delayed-free entry must not enter the release channel.
+
+    Recording an entry for a request that is no longer tracked could publish
+    finished_sending for blocks that are already released, or for an id the
+    scheduler no longer knows (e.g. a request aborted between the KV push and
+    the metadata handling). The entry must be dropped; the anomaly is surfaced
+    via a warning so the abort bookkeeping path can be investigated.
+    """
+    tracker = KVCacheTaskTracker()
+    module = sys.modules[KVCacheTaskTracker.__module__]
+    warnings: list[str] = []
+
+    def record_warning(msg, *args):
+        warnings.append(msg % args if args else msg)
+
+    monkeypatch.setattr(module.logger, "warning", record_warning)
+    tracker.add_delayed_request("req-aborted", time.time())
+
+    assert "req-aborted" not in tracker.delayed_free_requests
+    assert tracker.get_and_clear_finished_requests() == set()
+    assert any("not tracked in reqs_to_process" in warning for warning in warnings)
+
+
+def test_add_delayed_request_tracked_entry_is_recorded_without_warning(monkeypatch):
+    """The tracked-entry path keeps working without new warnings."""
+    tracker = KVCacheTaskTracker()
+    module = sys.modules[KVCacheTaskTracker.__module__]
+    warnings: list[str] = []
+
+    def record_warning(msg, *args):
+        warnings.append(msg % args if args else msg)
+
+    monkeypatch.setattr(module.logger, "warning", record_warning)
+    tracker.add_req_to_process("req-normal")
+    tracker.add_delayed_request("req-normal", time.time())
+
+    assert "req-normal" in tracker.delayed_free_requests
+    assert warnings == []
+
+
 @pytest.mark.parametrize("request_ids", [(), ("a",), ("a", "b", "c")], ids=["empty", "single", "multiple"])
 def test_tracker_publishes_completed_requests_once(request_ids):
     """Completion is observed through the public drain API, never seeded state."""
